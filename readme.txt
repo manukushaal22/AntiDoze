@@ -22,5 +22,11 @@
 ==>shape predictor SVM trained model link
     "https://github.com/AKSHAYUBHAT/TensorFace/blob/master/openface/models/dlib/shape_predictor_68_face_landmarks.dat?raw=true"
 
+==>project requirements
+    ==>macOS
+        $pip install playsound
+        $pip install pyobjc
+    ==>ubuntu
+        $pip install playsound
 
 
