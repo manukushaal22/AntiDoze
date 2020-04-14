@@ -48,3 +48,5 @@ for (i, rect) in enumerate(rects):
 # show the output image with the face detections + facial landmarks
 cv2.imshow("Output", image)
 cv2.waitKey(0)
+
+# python run.py --shape-predictor sourceCode/shape_predictor_68_face_landmarks.dat --image pic.jpg

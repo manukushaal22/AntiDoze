@@ -5,60 +5,105 @@ import time
 import dlib
 import cv2
 
-from sourceCode import pathLoader, speaker, EARcalculator
+from components import speaker, pathLoader, AspectRatioCalculator
+import ApplicationConstants
 
-paths = pathLoader.PathLoader("shape_predictor_68_face_landmarks.dat","alarm.wav",0)
-speakerSystem = speaker.Speaker(paths.getAlarmPath())
-eyeAspectRatio = EARcalculator.EyeAspectRatio()
+def main():
+    paths = pathLoader.PathLoader(r"../resources/shape_predictor_68_face_landmarks.dat", "../resources/alarm.wav", 0)
+    speakerSystem = speaker.Speaker(paths.getAlarmPath())
+    aspectRatioEstimator = AspectRatioCalculator.AspectRatioCalculator()
+    constants = ApplicationConstants.Constants()
 
-EYE_AR_THRESH = 0.3
-EYE_AR_CONSEC_FRAMES = 48
+    print("[INFO] loading facial landmark predictor...")
+    detector = dlib.get_frontal_face_detector()
+    predictor = dlib.shape_predictor(paths.getShapePredictorPath())
 
-COUNTER = 0
+    print("[INFO] starting video stream thread...")
+    camVideo = VideoStream(src=paths.getWebcamId()).start()
+    time.sleep(1.0)
 
-print("[INFO] loading facial landmark predictor...")
-detector = dlib.get_frontal_face_detector()
-predictor = dlib.shape_predictor(paths.getShapePredictorPath())
+    EYE_FRAME_COUNTER, MOUTH_FRAME_COUNTER, YAWN_FRAME_COUNTER, YAWN_COUNTER = 0, 0, 0, 0
+    ALERT, ALERT_COUNTER = False, 0
+    while True:
+        frame = camVideo.read()
+        frame = imutils.resize(frame, width=constants.WINDOW_SIZE)
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
-print("[INFO] starting video stream thread...")
-camVideo = VideoStream(src=paths.getWebcamId()).start()
-time.sleep(1.0)
+        rects = detector(gray, 0)
 
-while True:
-    frame = camVideo.read()
-    frame = imutils.resize(frame, width=450)
-    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        for rect in rects:
+            shape = predictor(gray, rect)
+            shape = face_utils.shape_to_np(shape)
+            aspectRatioEstimator.setFaceShape(shape)
 
-    rects = detector(gray, 0)
+            if constants.EYE_ANALYSIS_ON:
+                ear = aspectRatioEstimator.getEyeAspectRatio()
+                if ear < constants.EYE_AR_THRESHOLD:
+                    EYE_FRAME_COUNTER += 1
+                    if EYE_FRAME_COUNTER >= constants.EYE_CLOSE_CONSECUTIVE_FRAMES_THRESHOLD:
+                        if constants.ALARM_SYSTEM_ACTIVATE and not speakerSystem.isPlaying():
+                            speakerSystem.startAlarm()
+                        if constants.WINDOW_GUI_ACTIVATE:
+                            cv2.putText(frame, "DROWSINESS ALERT! (EYES)", (230, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+                else:
+                    EYE_FRAME_COUNTER = 0
+                    if constants.ALARM_SYSTEM_ACTIVATE:
+                        speakerSystem.stopAlarm()
+                if constants.WINDOW_GUI_ACTIVATE:
+                    cv2.putText(frame, "EAR: {:.2f}".format(ear), (20, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
 
-    for rect in rects:
-        shape = predictor(gray, rect)
-        shape = face_utils.shape_to_np(shape)
-        ear = eyeAspectRatio.getTotalEyeAspectRatio(shape)
+            if constants.MOUTH_ANALYSIS_ON:
+                mar = aspectRatioEstimator.getMouthAspectRatio()
+                if mar > constants.MOUTH_AR_THRESHOLD:
+                    MOUTH_FRAME_COUNTER += 1
+                    if MOUTH_FRAME_COUNTER >= constants.MOUTH_OPEN_CONSECUTIVE_FRAMES_THRESHOLD:
+                        YAWN_COUNTER +=1
+                        MOUTH_FRAME_COUNTER = 0
+                else:
+                    MOUTH_FRAME_COUNTER = 0
+                    if constants.ALARM_SYSTEM_ACTIVATE:
+                        speakerSystem.stopAlarm()
+                if constants.WINDOW_GUI_ACTIVATE:
+                    cv2.putText(frame, "MAR: {:.2f}".format(mar), (constants.WINDOW_SIZE - 150, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+                    cv2.putText(frame, "YAWNS: {}".format(YAWN_COUNTER), (constants.WINDOW_SIZE - 150, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+                if YAWN_COUNTER >= constants.MOUTH_YAWN_PER_MINUTE_THRESHOLD:
+                    if constants.ALARM_SYSTEM_ACTIVATE and not speakerSystem.isPlaying():
+                        speakerSystem.startAlarm()
+                        speakerSystem.stopAlarm()
+                    if constants.WINDOW_GUI_ACTIVATE:
+                        ALERT = True
+                    YAWN_FRAME_COUNTER, YAWN_COUNTER = 0, 0
+                if ALERT:
+                    ALERT_COUNTER += 1
+                    cv2.putText(frame, "DROWSINESS ALERT! (MOUTH)", (230, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+                    if ALERT_COUNTER >= 5 * constants.FRAMES_PER_SECOND:
+                        ALERT = False
+                        ALERT_COUNTER = 0
+                if YAWN_COUNTER>0:
+                    YAWN_FRAME_COUNTER += 1
+                    if YAWN_FRAME_COUNTER >= 60 * constants.FRAMES_PER_SECOND:
+                        YAWN_FRAME_COUNTER, YAWN_COUNTER = 0, 0
 
-        leftEyeHull = cv2.convexHull(eyeAspectRatio.getLeftEye())
-        rightEyeHull = cv2.convexHull(eyeAspectRatio.getRightEye())
-        cv2.drawContours(frame, [leftEyeHull], -1, (0, 255, 0), 1)
-        cv2.drawContours(frame, [rightEyeHull], -1, (0, 255, 0), 1)
+        if constants.WINDOW_GUI_ACTIVATE:
+            drawEyeMouthContours(frame, aspectRatioEstimator, constants.EYE_ANALYSIS_ON, constants.MOUTH_ANALYSIS_ON)
+            cv2.imshow("Frame", frame)
+            key = cv2.waitKey(1) & 0xFF
+            if key == ord("q"):
+                break
 
-        if ear < EYE_AR_THRESH:
-            COUNTER += 1
-            if COUNTER >= EYE_AR_CONSEC_FRAMES:
-                if not speakerSystem.isPlaying():
-                    speakerSystem.startAlarm()
-                cv2.putText(frame, "DROWSINESS ALERT!", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
-        else:
-            COUNTER = 0
-            speakerSystem.stopAlarm()
+    cv2.destroyAllWindows()
+    camVideo.stop()
 
-        cv2.putText(frame, "EAR: {:.2f}".format(ear), (300, 30),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
-    cv2.imshow("Frame", frame)
-    key = cv2.waitKey(1) & 0xFF
+if __name__=="__main__":
 
-    if key == ord("q"):
-        break
+    def drawEyeMouthContours(frame, aspectRatioEstimator, isEyeOn, isMouthOn):
+        if isEyeOn:
+            leftEyeHull = cv2.convexHull(aspectRatioEstimator.getLeftEye())
+            rightEyeHull = cv2.convexHull(aspectRatioEstimator.getRightEye())
+            cv2.drawContours(frame, [leftEyeHull], -1, (0, 255, 0), 1)
+            cv2.drawContours(frame, [rightEyeHull], -1, (0, 255, 0), 1)
+        if isMouthOn:
+            innerMouthHull = cv2.convexHull(aspectRatioEstimator.getInnerMouth())
+            cv2.drawContours(frame, [innerMouthHull], -1, (0, 255, 0), 1)
 
-cv2.destroyAllWindows()
-camVideo.stop()
-
+    main()
