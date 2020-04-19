@@ -27,7 +27,7 @@ class AspectRatioCalculator:
         return None
 
     def getMouthAspectRatio(self):
-        inner_mouth = self.getMouth()[-8:]
+        inner_mouth = self.getInnerMouth()
         vertical_1 = dist.euclidean(inner_mouth[1], inner_mouth[7])
         vertical_2 = dist.euclidean(inner_mouth[2], inner_mouth[6])
         vertical_3 = dist.euclidean(inner_mouth[3], inner_mouth[5])
@@ -53,4 +53,10 @@ class AspectRatioCalculator:
         ''' last 8 points of mouth cover the inner mouth'''
         if self.shape is not None:
             return self.getMouth()[-8:]
+        return None
+
+    def getOuterMouth(self):
+        ''' last 8 points of mouth cover the inner mouth'''
+        if self.shape is not None:
+            return self.getMouth()[:-8]
         return None
